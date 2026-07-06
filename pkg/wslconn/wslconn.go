@@ -68,8 +68,8 @@ type WslConn struct {
 
 var ConnServerCmdTemplate = strings.TrimSpace(
 	strings.Join([]string{
-		"%s version 2> /dev/null || (echo -n \"not-installed \"; uname -sm);",
-		"exec %s connserver --router --conn %s %s",
+		"[ -x %[1]s ] && %[1]s version 2> /dev/null || { echo -n \"not-installed \"; uname -sm; exit 0; };",
+		"exec %[2]s connserver --router --conn %[3]s %[4]s",
 	}, "\n"))
 
 func GetAllConnStatus() []wshrpc.ConnStatus {

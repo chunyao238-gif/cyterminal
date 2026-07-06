@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Tooltip } from "@/app/element/tooltip";
+import { FocusManager } from "@/app/store/focusManager";
+import { globalStore } from "@/app/store/jotaiStore";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { useWaveEnv, WaveEnv, WaveEnvSubset } from "@/app/waveenv/waveenv";
 import { shouldIncludeWidgetForWorkspace } from "@/app/workspace/widgetfilter";
 import { modalsModel } from "@/store/modalmodel";
+import * as WOS from "@/store/wos";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import {
     autoUpdate,
@@ -56,7 +59,27 @@ type WidgetPropsType = {
 };
 
 async function handleWidgetSelect(widget: WidgetConfigType, env: WidgetsEnv) {
-    const blockDef = widget.blockdef;
+    let blockDef = { ...widget.blockdef };
+    if (blockDef.meta?.view === "preview" && blockDef.meta?.file === "~") {
+        const activeBlockId = globalStore.get(FocusManager.getInstance().blockFocusAtom);
+        if (activeBlockId) {
+            const block = globalStore.get(WOS.getWaveObjectAtom<Block>(`block:${activeBlockId}`));
+            if (block) {
+                const connName = block.meta?.connection;
+                const cwd = block.meta?.["cmd:cwd"];
+                if (connName || cwd) {
+                    blockDef = {
+                        ...blockDef,
+                        meta: {
+                            ...blockDef.meta,
+                            connection: connName || "",
+                            file: cwd || "~",
+                        },
+                    };
+                }
+            }
+        }
+    }
     env.createBlock(blockDef, widget.magnified);
 }
 

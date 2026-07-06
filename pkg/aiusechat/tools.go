@@ -168,11 +168,24 @@ func GenerateTabStateAndTools(ctx context.Context, tabid string, widgetAccess bo
 		   (chatOpts.Config.APIType == uctypes.APIType_GoogleGemini && aiutil.GeminiSupportsImageToolResults(chatOpts.Config.Model)) {
 			tools = append(tools, GetCaptureScreenshotToolDefinition(tabid))
 		}
-		tools = append(tools, GetReadTextFileToolDefinition())
-		tools = append(tools, GetReadDirToolDefinition())
-		tools = append(tools, GetWriteTextFileToolDefinition())
-		tools = append(tools, GetEditTextFileToolDefinition())
-		tools = append(tools, GetDeleteTextFileToolDefinition())
+		hasRemote := false
+		for _, block := range blocks {
+			if block.Meta == nil {
+				continue
+			}
+			conn, _ := block.Meta["connection"].(string)
+			if conn != "" {
+				hasRemote = true
+				break
+			}
+		}
+		if !hasRemote {
+			tools = append(tools, GetReadTextFileToolDefinition())
+			tools = append(tools, GetReadDirToolDefinition())
+			tools = append(tools, GetWriteTextFileToolDefinition())
+			tools = append(tools, GetEditTextFileToolDefinition())
+			tools = append(tools, GetDeleteTextFileToolDefinition())
+		}
 		viewTypes := make(map[string]bool)
 		for _, block := range blocks {
 			if block.Meta == nil {
@@ -190,6 +203,7 @@ func GenerateTabStateAndTools(ctx context.Context, tabid string, widgetAccess bo
 		}
 		if viewTypes["term"] {
 			tools = append(tools, GetTermGetScrollbackToolDefinition(tabid))
+			tools = append(tools, GetTermRunCommandToolDefinition(tabid))
 			// tools = append(tools, GetTermCommandOutputToolDefinition(tabid))
 		}
 		if viewTypes["web"] {

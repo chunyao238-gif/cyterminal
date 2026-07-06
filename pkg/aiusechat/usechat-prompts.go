@@ -35,9 +35,7 @@ var SystemPromptText_OpenAI = strings.Join([]string{
 	`If a request would execute dangerous or destructive actions, warn briefly and provide a safer alternative.`,
 	`If output is very long, prefer a brief summary plus a copy-ready fenced block or offer a follow-up chunking strategy.`,
 
-	`You can write and edit local files on disk using available tools, but you cannot execute shell commands, run code in the terminal, or read/write remote files.`,
-	`If the user asks you to execute commands or run code, or deal with remote files say that these features aren't available yet AND make sure to say that they are coming soon (stay tuned for updates).`,
-	`Instead, show them exactly what command or code they could copy-paste to run manually.`,
+	`You can write and edit local files on disk. The read_text_file, read_dir, write_text_file, edit_text_file, and delete_text_file tools ONLY work on the local machine where the Wave application is running (your local disk). If the user is connected to a remote host via SSH, you MUST use the term_run_command tool to run shell commands (like cat, ls, find, mkdir, rm) to read, write, list, or modify files on that remote server. Use it to run query-only or modification commands directly in the terminal widget as needed.`,
 
 	// Final reminder
 	`You have NO API access to widgets or Wave unless provided via an explicit tool.`,

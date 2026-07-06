@@ -96,8 +96,8 @@ type SSHConn struct {
 
 var ConnServerCmdTemplate = strings.TrimSpace(
 	strings.Join([]string{
-		"%s version 2> /dev/null || (echo -n \"not-installed \"; uname -sm; exit 0);",
-		"exec %s connserver --conn %s %s %s",
+		"[ -x %[1]s ] && %[1]s version 2> /dev/null || { echo -n \"not-installed \"; uname -sm; exit 0; };",
+		"exec %[2]s connserver --conn %[3]s %[4]s %[5]s",
 	}, "\n"))
 
 func IsLocalConnName(connName string) bool {
@@ -894,6 +894,7 @@ func (conn *SSHConn) tryEnableWsh(ctx context.Context, clientDisplayName string)
 		err = fmt.Errorf("error starting conn server: %w", err)
 		return WshCheckResult{NoWshReason: "error starting connserver", NoWshCode: NoWshCode_ConnServerStartError, WshError: err}
 	}
+	conn.Infof(ctx, "CheckWsh: StartConnServer returned needsInstall=%v, clientVersion=%q, osArchStr=%q\n", needsInstall, clientVersion, osArchStr)
 	if needsInstall {
 		conn.Infof(ctx, "connserver needs to be (re)installed\n")
 		err = conn.InstallWsh(ctx, osArchStr)

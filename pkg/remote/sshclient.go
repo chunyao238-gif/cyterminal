@@ -382,7 +382,20 @@ func createPublicKeyCallback(connCtx context.Context, sshKeywords *wconfig.ConnK
 	}
 }
 
-func createPasswordCallbackPrompt(connCtx context.Context, remoteDisplayName string, password *string, debugInfo *ConnectionDebugInfo) func() (secret string, err error) {
+func sanitizeSecretName(remoteName string) string {
+	var sb strings.Builder
+	sb.WriteString("sshpassword_")
+	for _, r := range remoteName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+	return sb.String()
+}
+
+func createPasswordCallbackPrompt(connCtx context.Context, remoteDisplayName string, password *string, secretName string, debugInfo *ConnectionDebugInfo) func() (secret string, err error) {
 	return func() (secret string, outErr error) {
 		defer func() {
 			panicErr := panichandler.PanicHandler("sshclient:password-callback", recover())
@@ -408,12 +421,23 @@ func createPasswordCallbackPrompt(connCtx context.Context, remoteDisplayName str
 			QueryText:    queryText,
 			Markdown:     true,
 			Title:        "Password Authentication",
+			CheckBoxMsg:  "Remember password",
 		}
 		response, err := userinput.GetUserInput(ctx, request)
 		if err != nil {
 			blocklogger.Infof(connCtx, "[conndebug] ERROR Password Authentication failed: %v\n", SimpleMessageFromPossibleConnectionError(err))
 			return "", ConnectionError{ConnectionDebugInfo: debugInfo, Err: err}
 		}
+
+		if response.CheckboxStat && secretName != "" {
+			err = secretstore.SetSecret(secretName, response.Text)
+			if err != nil {
+				blocklogger.Infof(connCtx, "[conndebug] ERROR saving password to secret store: %v\n", err)
+			} else {
+				blocklogger.Infof(connCtx, "[conndebug] successfully saved password to secret store as %q\n", secretName)
+			}
+		}
+
 		blocklogger.Infof(connCtx, "[conndebug] got password from user, sending to ssh\n")
 		return response.Text, nil
 	}
@@ -780,8 +804,9 @@ func createClientConfig(connCtx context.Context, sshKeywords *wconfig.ConnKeywor
 	}
 
 	var sshPassword *string
+	var secretName string
 	if sshKeywords.SshPasswordSecretName != nil && *sshKeywords.SshPasswordSecretName != "" {
-		secretName := *sshKeywords.SshPasswordSecretName
+		secretName = *sshKeywords.SshPasswordSecretName
 		password, exists, err := secretstore.GetSecret(secretName)
 		if err != nil {
 			return nil, utilds.Errorf(ConnErrCode_SecretStore, "error retrieving ssh:passwordsecretname %q: %w", secretName, err)
@@ -791,11 +816,18 @@ func createClientConfig(connCtx context.Context, sshKeywords *wconfig.ConnKeywor
 		}
 		blocklogger.Infof(connCtx, "[conndebug] successfully retrieved ssh:passwordsecretname %q from secret store\n", secretName)
 		sshPassword = &password
+	} else {
+		secretName = sanitizeSecretName(remoteName)
+		password, exists, err := secretstore.GetSecret(secretName)
+		if err == nil && exists {
+			blocklogger.Infof(connCtx, "[conndebug] successfully retrieved remembered password from secret store using %q\n", secretName)
+			sshPassword = &password
+		}
 	}
 
 	publicKeyCallback := ssh.PublicKeysCallback(createPublicKeyCallback(connCtx, sshKeywords, authSockSigners, agentClient, debugInfo))
 	keyboardInteractive := ssh.KeyboardInteractive(createInteractiveKbdInteractiveChallenge(connCtx, remoteName, debugInfo))
-	passwordCallback := ssh.PasswordCallback(createPasswordCallbackPrompt(connCtx, remoteName, sshPassword, debugInfo))
+	passwordCallback := ssh.PasswordCallback(createPasswordCallbackPrompt(connCtx, remoteName, sshPassword, secretName, debugInfo))
 
 	// exclude gssapi-with-mic and hostbased until implemented
 	authMethodMap := map[string]ssh.AuthMethod{
@@ -953,6 +985,17 @@ func ConnectToClient(connCtx context.Context, opts *SSHOpts, currentClient *ssh.
 	networkAddr := utilfn.SafeDeref(sshKeywords.SshHostName) + ":" + utilfn.SafeDeref(sshKeywords.SshPort)
 	client, err := connectInternal(connCtx, networkAddr, clientConfig, debugInfo.CurrentClient)
 	if err != nil {
+		// If authentication failed, delete the saved password secret from secret store
+		// so that the user is prompted again next time they try to connect.
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "unable to authenticate") || strings.Contains(errMsg, "handshake failed") {
+			defaultSecretName := sanitizeSecretName(rawName)
+			_ = secretstore.DeleteSecret(defaultSecretName)
+			if sshKeywords.SshPasswordSecretName != nil && *sshKeywords.SshPasswordSecretName != "" {
+				_ = secretstore.DeleteSecret(*sshKeywords.SshPasswordSecretName)
+			}
+			blocklogger.Infof(connCtx, "[conndebug] authentication failed, cleared secret %q from secret store\n", defaultSecretName)
+		}
 		return client, debugInfo.JumpNum, ConnectionError{ConnectionDebugInfo: debugInfo, Err: err}
 	}
 	return client, debugInfo.JumpNum, nil

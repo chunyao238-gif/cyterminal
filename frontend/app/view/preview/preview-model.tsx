@@ -3,9 +3,12 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { FocusManager } from "@/app/store/focusManager";
 import { globalStore } from "@/app/store/jotaiStore";
+import { RpcApi } from "@/app/store/wshclientapi";
 import type { TabModel } from "@/app/store/tab-model";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { getLayoutModelForStaticTab } from "@/layout/index";
 import { getOverrideConfigAtom, refocusNode } from "@/store/global";
 import * as WOS from "@/store/wos";
 import { goHistory, goHistoryBack, goHistoryForward } from "@/util/historyutil";
@@ -152,6 +155,7 @@ export class PreviewModel implements ViewModel {
     newFileContent: PrimitiveAtom<string | null>;
     connectionError: PrimitiveAtom<string>;
     errorMsgAtom: PrimitiveAtom<ErrorMsg>;
+    wordWrapAtom: WritableAtom<boolean, [boolean], void>;
 
     openFileModal: PrimitiveAtom<boolean>;
     openFileModalDelay: PrimitiveAtom<boolean>;
@@ -285,6 +289,13 @@ export class PreviewModel implements ViewModel {
                         onClick: () => fireAndForget(this.handleFileSave.bind(this)),
                     });
                 }
+                viewTextChildren.push({
+                    elemtype: "toggleiconbutton",
+                    icon: "align-left",
+                    title: "Word Wrap",
+                    active: this.wordWrapAtom,
+                    className: "rounded-[4px] !py-[2px] !px-[6px]",
+                });
                 if (get(this.canPreview)) {
                     viewTextChildren.push({
                         elemtype: "textbutton",
@@ -335,6 +346,12 @@ export class PreviewModel implements ViewModel {
             if (mimeType == "directory") {
                 const showHiddenFiles = get(this.showHiddenFiles);
                 return [
+                    {
+                        elemtype: "iconbutton",
+                        icon: "location-arrow",
+                        title: "Sync to Active Terminal Path",
+                        click: () => fireAndForget(this.syncToActiveTerminal.bind(this)),
+                    },
                     {
                         elemtype: "iconbutton",
                         icon: showHiddenFiles ? "eye" : "eye-slash",
@@ -475,6 +492,21 @@ export class PreviewModel implements ViewModel {
         this.fullFile = fullFileAtom;
         this.fileContent = fileContentAtom;
 
+        this.wordWrapAtom = atom<boolean, [boolean], void>(
+            (get) => {
+                const blockData = get(this.blockAtom);
+                return blockData?.meta?.["editor:wordwrap"] ?? false;
+            },
+            (get, set, newValue: boolean) => {
+                fireAndForget(async () => {
+                    await RpcApi.SetMetaCommand(TabRpcClient, {
+                        oref: WOS.makeORef("block", blockId),
+                        meta: { "editor:wordwrap": newValue },
+                    });
+                });
+            }
+        );
+
         this.specializedView = atom<Promise<{ specializedView?: string; errorStr?: string }>>(async (get) => {
             return this.getSpecializedView(get);
         });
@@ -593,6 +625,60 @@ export class PreviewModel implements ViewModel {
         // Clear the saved file buffers
         globalStore.set(this.fileContentSaved, null);
         globalStore.set(this.newFileContent, null);
+    }
+
+    async syncToActiveTerminal() {
+        const layoutModel = getLayoutModelForStaticTab();
+        const leafOrder = globalStore.get(layoutModel.leafOrder);
+        const focusedStack: string[] = (layoutModel as any).focusedNodeIdStack || [];
+
+        // 1. Try to find the most recently focused terminal block from the focus stack
+        let targetBlockId: string | null = null;
+        for (const nodeId of focusedStack) {
+            const entry = leafOrder.find((leaf) => leaf.nodeid === nodeId);
+            if (entry && entry.blockid !== this.blockId) {
+                const block = globalStore.get(WOS.getWaveObjectAtom<Block>(`block:${entry.blockid}`));
+                if (block?.meta?.view === "term") {
+                    targetBlockId = entry.blockid;
+                    break;
+                }
+            }
+        }
+
+        // 2. Fallback: find the first terminal block in the tab's layout order
+        if (!targetBlockId) {
+            for (const entry of leafOrder) {
+                if (entry.blockid !== this.blockId) {
+                    const block = globalStore.get(WOS.getWaveObjectAtom<Block>(`block:${entry.blockid}`));
+                    if (block?.meta?.view === "term") {
+                        targetBlockId = entry.blockid;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!targetBlockId) {
+            return;
+        }
+
+        const block = globalStore.get(WOS.getWaveObjectAtom<Block>(`block:${targetBlockId}`));
+        if (block) {
+            const connName = block.meta?.connection;
+            const cwd = block.meta?.["cmd:cwd"];
+            if (connName || cwd) {
+                const updateMeta = {
+                    connection: connName || "",
+                    file: cwd || "~",
+                };
+                const blockOref = WOS.makeORef("block", this.blockId);
+                await this.env.services.object.UpdateObjectMeta(blockOref, updateMeta);
+
+                // Clear the saved file buffers
+                globalStore.set(this.fileContentSaved, null);
+                globalStore.set(this.newFileContent, null);
+            }
+        }
     }
 
     async goParentDirectory({ fileInfo = null }: { fileInfo?: FileInfo | null }) {

@@ -441,6 +441,9 @@ export class WaveAIModel {
                 oref: this.orefContext,
                 data: { "waveai:mode": mode },
             });
+            RpcApi.SetConfigCommand(TabRpcClient, {
+                "waveai:defaultmode": mode,
+            });
         }
     }
 
