@@ -77,7 +77,7 @@ export class LayoutModel {
     /**
      * Local atom holding the current tree state (source of truth during runtime)
      */
-    private localTreeStateAtom: PrimitiveAtom<LayoutTreeState>;
+    localTreeStateAtom: PrimitiveAtom<LayoutTreeState>;
     /**
      * The tree state (local cache)
      */
@@ -899,6 +899,18 @@ export class LayoutModel {
      */
     get focusedNodeId(): string {
         return this.focusedNodeIdStack[0];
+    }
+
+    getFocusedNodeIdStack(): string[] {
+        return this.focusedNodeIdStack;
+    }
+
+    getNode(nodeId: string): LayoutNode {
+        return findNode(this.treeState.rootNode, nodeId);
+    }
+
+    getLeafOrder(): LeafOrderEntry[] {
+        return this.getter(this.leafOrder);
     }
 
     /**

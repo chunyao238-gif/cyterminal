@@ -8,7 +8,7 @@ import { useWaveEnv } from "@/app/waveenv/waveenv";
 import { checkKeyPressed, isCharacterKeyEvent } from "@/util/keyutil";
 import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
 import { addOpenMenuItems } from "@/util/previewutil";
-import { fireAndForget } from "@/util/util";
+import { arrayToBase64, fireAndForget } from "@/util/util";
 import { formatRemoteUri } from "@/util/waveutil";
 import { offset, useDismiss, useFloating, useInteractions } from "@floating-ui/react";
 import {
@@ -87,13 +87,14 @@ interface DirectoryTableProps {
     data: FileInfo[];
     search: string;
     focusIndex: number;
-    setFocusIndex: (_: number) => void;
     setSearch: (_: string) => void;
     setSelectedPath: (_: string) => void;
     setRefreshVersion: React.Dispatch<React.SetStateAction<number>>;
     entryManagerOverlayPropsAtom: PrimitiveAtom<EntryManagerOverlayProps>;
     newFile: () => void;
     newDirectory: () => void;
+    selectedIndices: Set<number>;
+    onRowClick: (idx: number, e: React.MouseEvent) => void;
 }
 
 const columnHelper = createColumnHelper<FileInfo>();
@@ -103,13 +104,14 @@ function DirectoryTable({
     data,
     search,
     focusIndex,
-    setFocusIndex,
     setSearch,
     setSelectedPath,
     setRefreshVersion,
     entryManagerOverlayPropsAtom,
     newFile,
     newDirectory,
+    selectedIndices,
+    onRowClick,
 }: DirectoryTableProps) {
     const env = useWaveEnv<PreviewEnv>();
     const fullConfig = useAtomValue(env.atoms.fullConfigAtom);
@@ -287,11 +289,12 @@ function DirectoryTable({
                 table={table}
                 search={search}
                 focusIndex={focusIndex}
-                setFocusIndex={setFocusIndex}
                 setSearch={setSearch}
                 setSelectedPath={setSelectedPath}
                 setRefreshVersion={setRefreshVersion}
                 osRef={osRef.current}
+                selectedIndices={selectedIndices}
+                onRowClick={onRowClick}
             />
         </OverlayScrollbarsComponent>
     );
@@ -304,11 +307,12 @@ interface TableBodyProps {
     table: Table<FileInfo>;
     search: string;
     focusIndex: number;
-    setFocusIndex: (_: number) => void;
     setSearch: (_: string) => void;
     setSelectedPath: (_: string) => void;
     setRefreshVersion: React.Dispatch<React.SetStateAction<number>>;
     osRef: OverlayScrollbarsComponentRef;
+    selectedIndices: Set<number>;
+    onRowClick: (idx: number, e: React.MouseEvent) => void;
 }
 
 function TableBody({
@@ -317,10 +321,11 @@ function TableBody({
     table,
     search,
     focusIndex,
-    setFocusIndex,
     setSearch,
     setRefreshVersion,
     osRef,
+    selectedIndices,
+    onRowClick,
 }: TableBodyProps) {
     const searchActive = useAtomValue(model.directorySearchActive);
     const dummyLineRef = useRef<HTMLDivElement>(null);
@@ -464,10 +469,11 @@ function TableBody({
                         model={model}
                         row={dotdotRow}
                         focusIndex={focusIndex}
-                        setFocusIndex={setFocusIndex}
                         setSearch={setSearch}
                         idx={0}
                         handleFileContextMenu={handleFileContextMenu}
+                        selectedIndices={selectedIndices}
+                        onRowClick={onRowClick}
                         key="dotdot"
                     />
                 )}
@@ -476,10 +482,11 @@ function TableBody({
                         model={model}
                         row={row}
                         focusIndex={focusIndex}
-                        setFocusIndex={setFocusIndex}
                         setSearch={setSearch}
                         idx={dotdotRow ? idx + 1 : idx}
                         handleFileContextMenu={handleFileContextMenu}
+                        selectedIndices={selectedIndices}
+                        onRowClick={onRowClick}
                         key={idx}
                     />
                 ))}
@@ -492,15 +499,17 @@ type TableRowProps = {
     model: PreviewModel;
     row: Row<FileInfo>;
     focusIndex: number;
-    setFocusIndex: (_: number) => void;
     setSearch: (_: string) => void;
     idx: number;
     handleFileContextMenu: (e: any, finfo: FileInfo) => Promise<void>;
+    selectedIndices: Set<number>;
+    onRowClick: (idx: number, e: React.MouseEvent) => void;
 };
 
-function TableRow({ model, row, focusIndex, setFocusIndex, setSearch, idx, handleFileContextMenu }: TableRowProps) {
+function TableRow({ model, row, focusIndex, setSearch, idx, handleFileContextMenu, selectedIndices, onRowClick }: TableRowProps) {
     const dirPath = useAtomValue(model.statFilePath);
     const connection = useAtomValue(model.connection);
+    const isSelected = selectedIndices.has(idx);
 
     const dragItem: DraggedFile = {
         relName: row.getValue("name") as string,
@@ -526,7 +535,7 @@ function TableRow({ model, row, focusIndex, setFocusIndex, setSearch, idx, handl
 
     return (
         <div
-            className={clsx("dir-table-body-row", { focused: focusIndex === idx })}
+            className={clsx("dir-table-body-row", { focused: focusIndex === idx, selected: isSelected })}
             data-rowindex={idx}
             onDoubleClick={() => {
                 const newFileName = row.getValue("path") as string;
@@ -534,7 +543,7 @@ function TableRow({ model, row, focusIndex, setFocusIndex, setSearch, idx, handl
                 setSearch("");
                 globalStore.set(model.directorySearchActive, false);
             }}
-            onClick={() => setFocusIndex(idx)}
+            onClick={(e) => onRowClick(idx, e)}
             onContextMenu={(e) => handleFileContextMenu(e, row.original)}
             ref={dragRef}
         >
@@ -573,6 +582,198 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
     const finfo = useAtomValue(model.statFile);
     const dirPath = finfo?.path;
     const setErrorMsg = useSetAtom(model.errorMsgAtom);
+    const [isNativeDragging, setIsNativeDragging] = useState(false);
+    const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+    const anchorIndexRef = useRef<number | null>(null);
+
+    const clearSelection = useCallback(() => {
+        setSelectedIndices(new Set());
+    }, []);
+
+    const onRowClick = useCallback(
+        (idx: number, e: React.MouseEvent) => {
+            if (e.shiftKey) {
+                const anchor = anchorIndexRef.current;
+                if (anchor === null) {
+                    anchorIndexRef.current = idx;
+                    setFocusIndex(idx);
+                    return;
+                }
+                const rangeStart = Math.min(anchor, idx);
+                const rangeEnd = Math.max(anchor, idx);
+                const newSelection = new Set<number>();
+                for (let i = rangeStart; i <= rangeEnd; i++) {
+                    newSelection.add(i);
+                }
+                setSelectedIndices(newSelection);
+                setFocusIndex(idx);
+            } else if (e.ctrlKey || e.metaKey) {
+                setSelectedIndices((prev) => {
+                    const newSet = new Set(prev);
+                    if (newSet.has(idx)) {
+                        newSet.delete(idx);
+                    } else {
+                        newSet.add(idx);
+                        anchorIndexRef.current = idx;
+                    }
+                    return newSet;
+                });
+                setFocusIndex(idx);
+            } else {
+                anchorIndexRef.current = idx;
+                setSelectedIndices(new Set([idx]));
+                setFocusIndex(idx);
+            }
+        },
+        [setFocusIndex]
+    );
+
+    const hasFilesDragged = useCallback((dataTransfer: DataTransfer): boolean => {
+        return dataTransfer.types.includes("Files");
+    }, []);
+
+    const handleNativeDragOver = useCallback(
+        (e: React.DragEvent) => {
+            if (!e.dataTransfer || !hasFilesDragged(e.dataTransfer)) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "copy";
+        },
+        [hasFilesDragged]
+    );
+
+    const handleNativeDragEnter = useCallback(
+        (e: React.DragEvent) => {
+            if (!e.dataTransfer || !hasFilesDragged(e.dataTransfer)) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            setIsNativeDragging(true);
+        },
+        [hasFilesDragged]
+    );
+
+    const handleNativeDragLeave = useCallback(
+        (e: React.DragEvent) => {
+            if (!e.dataTransfer || !hasFilesDragged(e.dataTransfer)) {
+                return;
+            }
+            e.preventDefault();
+            setIsNativeDragging(false);
+        },
+        [hasFilesDragged]
+    );
+
+    const uploadFile = useCallback(
+        async (file: File, destUri: string) => {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                const base64Encoded = arrayToBase64(uint8Array);
+                await env.rpc.FileWriteCommand(
+                    TabRpcClient,
+                    {
+                        info: {
+                            path: `${destUri}/${file.name}`,
+                        },
+                        data64: base64Encoded,
+                    },
+                    null
+                );
+            } catch (err) {
+                console.warn("File upload failed:", err);
+                setErrorMsg({
+                    status: "Upload Failed",
+                    text: `${err}`,
+                    level: "error",
+                });
+            }
+        },
+        [env.rpc.FileWriteCommand]
+    );
+
+    const uploadDirectoryEntry = useCallback(
+        async (dirEntry: FileSystemDirectoryEntry, destUri: string) => {
+            const dirName = dirEntry.name;
+            const newDestUri = `${destUri}/${dirName}`;
+            try {
+                await env.rpc.FileMkdirCommand(
+                    TabRpcClient,
+                    { info: { path: newDestUri } },
+                    null
+                );
+            } catch (err) {
+                console.warn("Directory creation failed:", err);
+            }
+            const reader = dirEntry.createReader();
+            const readAllEntries = (): Promise<FileSystemEntry[]> => {
+                return new Promise((resolve) => {
+                    const allEntries: FileSystemEntry[] = [];
+                    const readBatch = () => {
+                        reader.readEntries((entries) => {
+                            if (entries.length === 0) {
+                                resolve(allEntries);
+                            } else {
+                                allEntries.push(...entries);
+                                readBatch();
+                            }
+                        });
+                    };
+                    readBatch();
+                });
+            };
+            const entries = await readAllEntries();
+            for (const entry of entries) {
+                if (entry.isDirectory) {
+                    await uploadDirectoryEntry(entry as FileSystemDirectoryEntry, newDestUri);
+                } else if (entry.isFile) {
+                    const fileEntry = entry as FileSystemFileEntry;
+                    const file = await new Promise<File>((resolve, reject) => {
+                        fileEntry.file(resolve, reject);
+                    });
+                    await uploadFile(file, newDestUri);
+                }
+            }
+        },
+        [env.rpc.FileMkdirCommand, uploadFile]
+    );
+
+    const handleNativeDrop = useCallback(
+        async (e: React.DragEvent) => {
+            setIsNativeDragging(false);
+            if (!e.dataTransfer || e.dataTransfer.files.length === 0) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            const destUri = await model.formatRemoteUri(dirPath, globalStore.get);
+            const items = e.dataTransfer.items;
+            for (let i = 0; i < items.length; i++) {
+                const entry = items[i].webkitGetAsEntry();
+                if (!entry) {
+                    const file = e.dataTransfer.files[i];
+                    if (file) {
+                        await uploadFile(file, destUri);
+                    }
+                    continue;
+                }
+                if (entry.isDirectory) {
+                    await uploadDirectoryEntry(entry as FileSystemDirectoryEntry, destUri);
+                } else if (entry.isFile) {
+                    const fileEntry = entry as FileSystemFileEntry;
+                    const file = await new Promise<File>((resolve, reject) => {
+                        fileEntry.file(resolve, reject);
+                    });
+                    await uploadFile(file, destUri);
+                }
+            }
+            model.refreshCallback();
+        },
+        [dirPath, model.formatRemoteUri, model.refreshCallback, uploadFile, uploadDirectoryEntry]
+    );
 
     useEffect(() => {
         model.refreshCallback = () => {
@@ -866,7 +1067,7 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
         <Fragment>
             <div
                 ref={refs.setReference}
-                className="dir-table-container"
+                className={clsx("dir-table-container", { "dir-table-native-dragging": isNativeDragging })}
                 onChangeCapture={(e) => {
                     const event = e as React.ChangeEvent<HTMLInputElement>;
                     if (!entryManagerProps) {
@@ -875,20 +1076,28 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
                 }}
                 {...getReferenceProps()}
                 onContextMenu={(e) => handleFileContextMenu(e)}
-                onClick={() => setEntryManagerProps(undefined)}
+                onClick={() => {
+                    setEntryManagerProps(undefined);
+                    clearSelection();
+                }}
+                onDragOver={handleNativeDragOver}
+                onDragEnter={handleNativeDragEnter}
+                onDragLeave={handleNativeDragLeave}
+                onDrop={handleNativeDrop}
             >
                 <DirectoryTable
                     model={model}
                     data={filteredData}
                     search={searchText}
                     focusIndex={focusIndex}
-                    setFocusIndex={setFocusIndex}
                     setSearch={setSearchText}
                     setSelectedPath={setSelectedPath}
                     setRefreshVersion={setRefreshVersion}
                     entryManagerOverlayPropsAtom={entryManagerPropsAtom}
                     newFile={newFile}
                     newDirectory={newDirectory}
+                    selectedIndices={selectedIndices}
+                    onRowClick={onRowClick}
                 />
             </div>
             {entryManagerProps && (

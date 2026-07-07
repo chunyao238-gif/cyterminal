@@ -6,6 +6,13 @@
     flex-direction: column;
     height: 100%;
     --min-row-width: 35rem;
+
+    &.dir-table-native-dragging {
+        outline: 2px dashed oklch(from var(--block-bg-color) calc(l + 0.3) c h);
+        outline-offset: -2px;
+        background-color: oklch(from var(--block-bg-color) calc(l + 0.1) c h / 0.3);
+    }
+
     .dir-table {
         height: 100%;
         width: 100%;
@@ -127,6 +134,20 @@
                         }
                     }
 
+                    &.selected {
+                        background-color: rgb(from var(--accent-color) r g b / 0.2);
+                        color: var(--main-text-color);
+
+                        .dir-table-body-cell {
+                            .dir-table-lastmod,
+                            .dir-table-modestr,
+                            .dir-table-size,
+                            .dir-table-type {
+                                color: var(--main-text-color);
+                            }
+                        }
+                    }
+
                     &:focus {
                         background-color: rgb(from var(--accent-color) r g b / 0.5);
                         color: var(--main-text-color);
@@ -141,11 +162,11 @@
                         }
                     }
 
-                    &:nth-child(odd):not(.focused):not(:focus) {
+                    &:nth-child(odd):not(.focused):not(:focus):not(.selected) {
                         background-color: rgba(255, 255, 255, 0.06);
                     }
 
-                    &:hover:not(:focus):not(.focused) {
+                    &:hover:not(:focus):not(.focused):not(.selected) {
                         background-color: var(--highlight-bg-color);
                     }
 

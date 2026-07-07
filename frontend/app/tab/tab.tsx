@@ -16,6 +16,7 @@ import { makeORef } from "../store/wos";
 import { TabBadges } from "./tabbadges";
 import "./tab.scss";
 import { buildTabContextMenu } from "./tabcontextmenu";
+import { getLayoutModelForTabById } from "@/layout/index";
 
 export type TabEnv = WaveEnvSubset<{
     rpc: {
@@ -254,6 +255,64 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
     const renameRef = useRef<(() => void) | null>(null);
     const tabModel = getTabModelByTabId(id, env);
 
+    const layoutModel = getLayoutModelForTabById(id);
+    const focusedNode = useAtomValue(layoutModel.focusedNode);
+    // Subscribe to tree state to re-evaluate when layout nodes change
+    const treeState = useAtomValue(layoutModel.localTreeStateAtom);
+    const fullConfig = useAtomValue(env.atoms.fullConfigAtom);
+
+    // Find active block ID under this tab
+    let activeBlockId: string | null = null;
+    if (focusedNode?.data?.blockId) {
+        activeBlockId = focusedNode.data.blockId;
+    } else {
+        const stack = layoutModel.getFocusedNodeIdStack() || [];
+        for (let i = stack.length - 1; i >= 0; i--) {
+            const node = layoutModel.getNode(stack[i]);
+            if (node?.data?.blockId) {
+                activeBlockId = node.data.blockId;
+                break;
+            }
+        }
+        if (!activeBlockId) {
+            const leafOrder = layoutModel.getLeafOrder() || [];
+            for (const leaf of leafOrder) {
+                const node = layoutModel.getNode(leaf.nodeid);
+                if (node?.data?.blockId) {
+                    activeBlockId = node.data.blockId;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Load active block data
+    const [blockData] = env.wos.useWaveObjectValue<Block>(
+        activeBlockId ? makeORef("block", activeBlockId) : "block/dummy"
+    );
+
+    // Compute dynamic tab name
+    let computedTabName = tabData?.name ?? "";
+    const defaultTabNameRe = /^T\d+$/;
+    if (!computedTabName || defaultTabNameRe.test(computedTabName)) {
+        if (blockData) {
+            const connName = blockData.meta?.connection || "";
+            const isLocal = !connName || connName === "local" || connName.startsWith("local:");
+            if (isLocal) {
+                const localShellPath = blockData.meta?.["term:localshellpath"] || fullConfig?.settings?.["term:localshellpath"] || "";
+                if (localShellPath.toLowerCase().includes("cmd.exe") || localShellPath.toLowerCase() === "cmd") {
+                    computedTabName = "local_cmd";
+                } else {
+                    computedTabName = "local_powershell";
+                }
+            } else {
+                const connConfig = fullConfig?.connections?.[connName];
+                const hostIp = connConfig?.["ssh:hostname"] || connName;
+                computedTabName = hostIp;
+            }
+        }
+    }
+
     useEffect(() => {
         if (!loadedRef.current) {
             onLoaded();
@@ -296,7 +355,7 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
         <TabV
             ref={ref}
             tabId={id}
-            tabName={tabData?.name ?? ""}
+            tabName={computedTabName}
             active={active}
             showDivider={showDivider}
             isDragging={isDragging}

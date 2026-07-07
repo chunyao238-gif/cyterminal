@@ -351,6 +351,10 @@ func (bc *ShellController) getConnUnion(logCtx context.Context, remoteName strin
 		rtn.ConnType = ConnType_Local
 		rtn.WshEnabled = wshEnabled
 	} else {
+		err := conncontroller.EnsureConnection(logCtx, remoteName)
+		if err != nil {
+			return ConnUnion{}, fmt.Errorf("failed to ensure connection %q: %w", remoteName, err)
+		}
 		opts, err := remote.ParseOpts(remoteName)
 		if err != nil {
 			return ConnUnion{}, fmt.Errorf("invalid ssh remote name (%s): %w", remoteName, err)
@@ -358,10 +362,6 @@ func (bc *ShellController) getConnUnion(logCtx context.Context, remoteName strin
 		conn := conncontroller.MaybeGetConn(opts)
 		if conn == nil {
 			return ConnUnion{}, fmt.Errorf("ssh connection not found: %s", remoteName)
-		}
-		connStatus := conn.DeriveConnStatus()
-		if connStatus.Status != conncontroller.Status_Connected {
-			return ConnUnion{}, fmt.Errorf("ssh connection %s not connected, cannot start shellproc", remoteName)
 		}
 		rtn.ConnType = ConnType_Ssh
 		rtn.SshConn = conn

@@ -3,7 +3,7 @@
 
 import { TileLayout } from "./lib/TileLayout";
 import { LayoutModel } from "./lib/layoutModel";
-import { deleteLayoutModelForTab, getLayoutModelForStaticTab, useDebouncedNodeInnerRect } from "./lib/layoutModelHooks";
+import { deleteLayoutModelForTab, getLayoutModelForStaticTab, getLayoutModelForTabById, useDebouncedNodeInnerRect } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
 import type {
     ContentRenderer,
@@ -31,6 +31,7 @@ export {
     deleteLayoutModelForTab,
     DropDirection,
     getLayoutModelForStaticTab,
+    getLayoutModelForTabById,
     LayoutModel,
     LayoutTreeActionType,
     NavigateDirection,

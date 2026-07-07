@@ -989,8 +989,21 @@ func ConnectToClient(connCtx context.Context, opts *SSHOpts, currentClient *ssh.
 		// so that the user is prompted again next time they try to connect.
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "unable to authenticate") || strings.Contains(errMsg, "handshake failed") {
+			// Clear all potential secret keys to ensure we catch alias and normalized names
 			defaultSecretName := sanitizeSecretName(rawName)
 			_ = secretstore.DeleteSecret(defaultSecretName)
+
+			chosenUser := utilfn.SafeDeref(sshKeywords.SshUser)
+			chosenHostName := utilfn.SafeDeref(sshKeywords.SshHostName)
+			chosenPort := utilfn.SafeDeref(sshKeywords.SshPort)
+			if chosenHostName != "" {
+				remoteName := xknownhosts.Normalize(chosenHostName + ":" + chosenPort)
+				if chosenUser != "" {
+					remoteName = chosenUser + "@" + remoteName
+				}
+				_ = secretstore.DeleteSecret(sanitizeSecretName(remoteName))
+			}
+
 			if sshKeywords.SshPasswordSecretName != nil && *sshKeywords.SshPasswordSecretName != "" {
 				_ = secretstore.DeleteSecret(*sshKeywords.SshPasswordSecretName)
 			}

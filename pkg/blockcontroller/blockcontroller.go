@@ -27,6 +27,7 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
 	"github.com/wavetermdev/waveterm/pkg/wslconn"
 	"github.com/wavetermdev/waveterm/pkg/wstore"
+	"github.com/wavetermdev/waveterm/pkg/wconfig"
 )
 
 const (
@@ -189,6 +190,17 @@ func ResyncController(ctx context.Context, tabId string, blockId string, rtOpts 
 
 	// Determine if we should use DurableShellController vs ShellController
 	shouldUseDurableShellController := controllerName == BlockController_Shell && jobcontroller.IsBlockIdTermDurable(blockId)
+	if shouldUseDurableShellController && !conncontroller.IsLocalConnName(connName) {
+		fullConfig := wconfig.GetWatcher().GetFullConfig()
+		enableWsh := fullConfig.Settings.ConnWshEnabled
+		connSettings, ok := fullConfig.Connections[connName]
+		if ok && connSettings.ConnWshEnabled != nil {
+			enableWsh = *connSettings.ConnWshEnabled
+		}
+		if !enableWsh {
+			shouldUseDurableShellController = false
+		}
+	}
 
 	// Check if we need to morph controller type
 	if existing != nil {
@@ -441,17 +453,9 @@ func CheckConnStatus(blockId string) error {
 		}
 		return nil
 	}
-	opts, err := remote.ParseOpts(connName)
+	err = conncontroller.EnsureConnection(context.Background(), connName)
 	if err != nil {
-		return fmt.Errorf("error parsing connection name: %w", err)
-	}
-	conn := conncontroller.MaybeGetConn(opts)
-	if conn == nil {
-		return fmt.Errorf("no connection found")
-	}
-	connStatus := conn.DeriveConnStatus()
-	if connStatus.Status != conncontroller.Status_Connected {
-		return fmt.Errorf("not connected: %s", connStatus.Status)
+		return fmt.Errorf("failed to ensure connection %q: %w", connName, err)
 	}
 	return nil
 }
