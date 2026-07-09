@@ -508,7 +508,7 @@ func (conn *SSHConn) StartConnServer(ctx context.Context, afterUpdate bool, useR
 		sshSession.Close()
 		return true, clientVersion, osArchStr, nil
 	}
-	jwtLine, err := utilfn.ReadLineWithTimeout(linesChan, 3*time.Second)
+	jwtLine, err := utilfn.ReadLineWithTimeout(linesChan, 15*time.Second)
 	if err != nil {
 		sshSession.Close()
 		return false, clientVersion, "", fmt.Errorf("error reading jwt status line: %w", err)

@@ -10,7 +10,7 @@ const AuthKeyHeader = "X-AuthKey";
 const dlog = debug("wave:ws");
 
 const WarnWebSocketSendSize = 1024 * 1024; // 1MB
-const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
+const MaxWebSocketSendSize = 10 * 1024 * 1024; // 10MB
 const reconnectHandlers: (() => void)[] = [];
 const StableConnTime = 2000;
 

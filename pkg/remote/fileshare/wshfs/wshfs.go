@@ -19,13 +19,13 @@ import (
 )
 
 const (
-	RemoteFileTransferSizeLimit = 32 * 1024 * 1024
-	DefaultTimeout              = 30 * time.Second
-	FileMode                    = os.FileMode(0644)
-	DirMode                     = os.FileMode(0755) | os.ModeDir
-	RecursiveRequiredError      = "recursive flag must be set for directory operations"
-	MergeRequiredError          = "directory already exists at %q, set overwrite flag to delete the existing contents or set merge flag to merge the contents"
-	OverwriteRequiredError      = "file already exists at %q, set overwrite flag to delete the existing file"
+	RemoteFileWriteSizeLimit = 100 * 1024 * 1024
+	DefaultTimeout           = 30 * time.Second
+	FileMode                 = os.FileMode(0644)
+	DirMode                  = os.FileMode(0755) | os.ModeDir
+	RecursiveRequiredError   = "recursive flag must be set for directory operations"
+	MergeRequiredError       = "directory already exists at %q, set overwrite flag to delete the existing contents or set merge flag to merge the contents"
+	OverwriteRequiredError   = "file already exists at %q, set overwrite flag to delete the existing file"
 )
 
 // This needs to be set by whoever initializes the client, either main-server or wshcmd-connserver
@@ -167,8 +167,8 @@ func PutFile(ctx context.Context, data wshrpc.FileData) error {
 		return err
 	}
 	dataSize := base64.StdEncoding.DecodedLen(len(data.Data64))
-	if dataSize > RemoteFileTransferSizeLimit {
-		return fmt.Errorf("file data size %d exceeds transfer limit of %d bytes", dataSize, RemoteFileTransferSizeLimit)
+	if dataSize > RemoteFileWriteSizeLimit {
+		return fmt.Errorf("file data size %d exceeds write limit of %d bytes", dataSize, RemoteFileWriteSizeLimit)
 	}
 	info := data.Info
 	if info == nil {
@@ -189,8 +189,8 @@ func Append(ctx context.Context, data wshrpc.FileData) error {
 		return err
 	}
 	dataSize := base64.StdEncoding.DecodedLen(len(data.Data64))
-	if dataSize > RemoteFileTransferSizeLimit {
-		return fmt.Errorf("file data size %d exceeds transfer limit of %d bytes", dataSize, RemoteFileTransferSizeLimit)
+	if dataSize > RemoteFileWriteSizeLimit {
+		return fmt.Errorf("file data size %d exceeds write limit of %d bytes", dataSize, RemoteFileWriteSizeLimit)
 	}
 	info := data.Info
 	if info == nil {

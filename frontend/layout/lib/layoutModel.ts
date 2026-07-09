@@ -355,6 +355,9 @@ export class LayoutModel {
     }
 
     private initializeFromWaveObject() {
+        if (!this.waveObjectAtom) {
+            return;
+        }
         const waveObjState = this.getter(this.waveObjectAtom);
 
         const initialState: LayoutTreeState = {
@@ -377,6 +380,9 @@ export class LayoutModel {
     }
 
     onBackendUpdate() {
+        if (!this.waveObjectAtom) {
+            return;
+        }
         const waveObj = this.getter(this.waveObjectAtom);
         const pendingActions = waveObj?.pendingbackendactions;
         if (pendingActions?.length) {
@@ -385,6 +391,9 @@ export class LayoutModel {
     }
 
     private async processPendingBackendActions() {
+        if (!this.waveObjectAtom) {
+            return;
+        }
         const waveObj = this.getter(this.waveObjectAtom);
         const actions = waveObj?.pendingbackendactions;
         if (!actions?.length) return;
@@ -579,6 +588,7 @@ export class LayoutModel {
         }
 
         this.persistDebounceTimer = setTimeout(() => {
+            if (!this.waveObjectAtom) return;
             const waveObj = this.getter(this.waveObjectAtom);
             if (!waveObj) return;
 

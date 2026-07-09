@@ -191,6 +191,14 @@ function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boo
 }
 
 function getWaveObjectValue<T extends WaveObj>(oref: string, createIfMissing = true): WaveObjectValue<T> {
+    if (oref === "block/dummy") {
+        let dummyWov = waveObjectValueCache.get("block/dummy");
+        if (!dummyWov) {
+            dummyWov = { pendingPromise: null, dataAtom: atom({ value: null, loading: false }) };
+            waveObjectValueCache.set("block/dummy", dummyWov);
+        }
+        return dummyWov as WaveObjectValue<T>;
+    }
     let wov = waveObjectValueCache.get(oref);
     if (wov === undefined && createIfMissing) {
         wov = createWaveValueObject(oref, true);

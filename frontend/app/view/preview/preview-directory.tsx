@@ -562,7 +562,7 @@ function TableRow({ model, row, focusIndex, setSearch, idx, handleFileContextMen
 
 const MemoizedTableBody = React.memo(
     TableBody,
-    (prev, next) => prev.table.options.data == next.table.options.data
+    (prev, next) => prev.table.options.data == next.table.options.data && prev.selectedIndices === next.selectedIndices
 ) as typeof TableBody;
 
 interface DirectoryPreviewProps {
@@ -585,6 +585,7 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
     const [isNativeDragging, setIsNativeDragging] = useState(false);
     const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
     const anchorIndexRef = useRef<number | null>(null);
+    const [uploadProgress, setUploadProgress] = useState<{ total: number; completed: number } | null>(null);
 
     const clearSelection = useCallback(() => {
         setSelectedIndices(new Set());
@@ -667,8 +668,40 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
         [hasFilesDragged]
     );
 
+    const bumpProgress = useCallback(() => {
+        setUploadProgress((prev) => {
+            const next = {
+                total: (prev?.total ?? 0) + 1,
+                completed: (prev?.completed ?? 0) + 1,
+            };
+            console.log("[DROP-UPLOAD] progress", JSON.stringify(next));
+            return next;
+        });
+    }, []);
+
+    const throttledRefresh = useMemo(() => debounce(500, () => model.refreshCallback()), [model.refreshCallback]);
+
     const uploadFile = useCallback(
         async (file: File, destUri: string) => {
+            const fileName = file.name;
+            const filePath = `${destUri}/${fileName}`;
+            console.log("[DROP-UPLOAD] uploadFile start:", filePath, "size:", file.size);
+            const localPath = env.electron.getPathForFile(file);
+            if (localPath) {
+                const localUri = formatRemoteUri(localPath, "local");
+                const timeoutMs = Math.ceil(Math.max(60000, file.size / 1024 * 200));
+                await env.rpc.FileCopyCommand(
+                    TabRpcClient,
+                    {
+                        srcuri: localUri,
+                        desturi: filePath,
+                        opts: { timeout: timeoutMs },
+                    },
+                    { timeout: timeoutMs }
+                );
+                console.log("[DROP-UPLOAD] uploadFile (FileCopy) done:", filePath);
+                return;
+            }
             try {
                 const arrayBuffer = await file.arrayBuffer();
                 const uint8Array = new Uint8Array(arrayBuffer);
@@ -676,15 +709,14 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
                 await env.rpc.FileWriteCommand(
                     TabRpcClient,
                     {
-                        info: {
-                            path: `${destUri}/${file.name}`,
-                        },
+                        info: { path: filePath },
                         data64: base64Encoded,
                     },
-                    null
+                    { timeout: 60000 }
                 );
+                console.log("[DROP-UPLOAD] uploadFile (FileWrite) done:", filePath);
             } catch (err) {
-                console.warn("File upload failed:", err);
+                console.warn("[DROP-UPLOAD] uploadFile failed:", filePath, err);
                 setErrorMsg({
                     status: "Upload Failed",
                     text: `${err}`,
@@ -692,87 +724,171 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
                 });
             }
         },
-        [env.rpc.FileWriteCommand]
+        [env.rpc.FileCopyCommand, env.rpc.FileWriteCommand, env.electron]
     );
 
-    const uploadDirectoryEntry = useCallback(
-        async (dirEntry: FileSystemDirectoryEntry, destUri: string) => {
-            const dirName = dirEntry.name;
-            const newDestUri = `${destUri}/${dirName}`;
+    const getFileFromEntry = useCallback(
+        (fileEntry: FileSystemFileEntry): Promise<File> => {
+            console.log("[DROP-UPLOAD] getFileFromEntry:", fileEntry.name);
+            return new Promise<File>((resolve, reject) => {
+                fileEntry.file(resolve, reject);
+            });
+        },
+        []
+    );
+
+    const uploadDirRecursive = useCallback(
+        async (dirEntry: FileSystemDirectoryEntry, destUri: string, depth: number = 0) => {
+            console.log("[DROP-UPLOAD] uploadDir start:", dirEntry.name, "depth:", depth);
+            if (depth > 20) {
+                console.warn("[DROP-UPLOAD] Max directory depth exceeded:", destUri + "/" + dirEntry.name);
+                return;
+            }
+            const newDestUri = `${destUri}/${dirEntry.name}`;
             try {
-                await env.rpc.FileMkdirCommand(
-                    TabRpcClient,
-                    { info: { path: newDestUri } },
-                    null
-                );
+                await env.rpc.FileMkdirCommand(TabRpcClient, { info: { path: newDestUri } }, null);
+                console.log("[DROP-UPLOAD] mkdir done:", newDestUri);
             } catch (err) {
-                console.warn("Directory creation failed:", err);
+                console.warn("[DROP-UPLOAD] mkdir failed:", newDestUri, err);
+                return;
             }
             const reader = dirEntry.createReader();
-            const readAllEntries = (): Promise<FileSystemEntry[]> => {
-                return new Promise((resolve) => {
-                    const allEntries: FileSystemEntry[] = [];
-                    const readBatch = () => {
-                        reader.readEntries((entries) => {
-                            if (entries.length === 0) {
-                                resolve(allEntries);
-                            } else {
-                                allEntries.push(...entries);
-                                readBatch();
-                            }
-                        });
-                    };
-                    readBatch();
-                });
-            };
-            const entries = await readAllEntries();
+            const entries: FileSystemEntry[] = [];
+            await new Promise<void>((resolve) => {
+                const readBatch = () => {
+                    reader.readEntries((items) => {
+                        if (items.length === 0) {
+                            resolve();
+                            return;
+                        }
+                        entries.push(...items);
+                        readBatch();
+                    });
+                };
+                readBatch();
+            });
+            console.log("[DROP-UPLOAD] readEntries done:", dirEntry.name, "count:", entries.length);
+            let fileIdx = 0;
             for (const entry of entries) {
                 if (entry.isDirectory) {
-                    await uploadDirectoryEntry(entry as FileSystemDirectoryEntry, newDestUri);
+                    await uploadDirRecursive(entry as FileSystemDirectoryEntry, newDestUri, depth + 1);
                 } else if (entry.isFile) {
+                    fileIdx++;
                     const fileEntry = entry as FileSystemFileEntry;
-                    const file = await new Promise<File>((resolve, reject) => {
-                        fileEntry.file(resolve, reject);
-                    });
-                    await uploadFile(file, newDestUri);
+                    try {
+                        const file = await getFileFromEntry(fileEntry);
+                        await uploadFile(file, newDestUri);
+                        bumpProgress();
+                        throttledRefresh();
+                        console.log("[DROP-UPLOAD] file done:", newDestUri + "/" + fileEntry.name, "idx:", fileIdx);
+                    } catch (err) {
+                        console.warn("[DROP-UPLOAD] file failed:", newDestUri + "/" + fileEntry.name, err);
+                        bumpProgress();
+                    }
                 }
             }
+            console.log("[DROP-UPLOAD] uploadDir end:", dirEntry.name, "files:", fileIdx);
         },
-        [env.rpc.FileMkdirCommand, uploadFile]
+        [env.rpc.FileMkdirCommand, uploadFile, getFileFromEntry, bumpProgress, throttledRefresh]
+    );
+
+    const collectDropItems = useCallback(
+        async (dataTransfer: DataTransfer): Promise<Array<{ file: File } | { dirEntry: FileSystemDirectoryEntry }>> => {
+            const items: Array<{ file: File } | { dirEntry: FileSystemDirectoryEntry }> = [];
+            console.log("[DROP-UPLOAD] collectDropItems: items.length:", dataTransfer.items.length, "files.length:", dataTransfer.files.length);
+            for (let i = 0; i < dataTransfer.items.length; i++) {
+                const entry = dataTransfer.items[i].webkitGetAsEntry();
+                const fallbackFile = dataTransfer.files[i];
+                if (!entry) {
+                    console.log("[DROP-UPLOAD] item[", i, "] no entry -> file:", fallbackFile?.name ?? "null", "size:", fallbackFile?.size ?? 0);
+                    if (fallbackFile) {
+                        items.push({ file: fallbackFile });
+                    }
+                    continue;
+                }
+                if (entry.isDirectory) {
+                    console.log("[DROP-UPLOAD] item[", i, "] dir:", entry.name);
+                    items.push({ dirEntry: entry as FileSystemDirectoryEntry });
+                } else if (entry.isFile) {
+                    const fileEntry = entry as FileSystemFileEntry;
+                    console.log("[DROP-UPLOAD] item[", i, "] file entry:", entry.name);
+                    try {
+                        const file = await getFileFromEntry(fileEntry);
+                        items.push({ file });
+                    } catch (err) {
+                        console.warn("[DROP-UPLOAD] getFileFromEntry failed for:", entry.name, "falling back to files[i]");
+                        if (fallbackFile) {
+                            items.push({ file: fallbackFile });
+                        }
+                    }
+                } else {
+                    console.log("[DROP-UPLOAD] item[", i, "] unknown entry type, falling back to file:", fallbackFile?.name ?? "null");
+                    if (fallbackFile) {
+                        items.push({ file: fallbackFile });
+                    }
+                }
+            }
+            console.log("[DROP-UPLOAD] collectDropItems done, count:", items.length, "of", dataTransfer.items.length);
+            return items;
+        },
+        [getFileFromEntry]
+    );
+
+    const processDropUpload = useCallback(
+        async (destUri: string, dropItems: Array<{ file: File } | { dirEntry: FileSystemDirectoryEntry }>) => {
+            console.log("[DROP-UPLOAD] processDropUpload start, destUri:", destUri, "itemCount:", dropItems.length);
+            setUploadProgress({ total: 0, completed: 0 });
+            let itemIdx = 0;
+            for (const item of dropItems) {
+                itemIdx++;
+                if ("dirEntry" in item) {
+                    console.log("[DROP-UPLOAD] processing dir item[", itemIdx, "]:", item.dirEntry.name);
+                    await uploadDirRecursive(item.dirEntry, destUri);
+                    console.log("[DROP-UPLOAD] dir item done:", item.dirEntry.name);
+                } else {
+                    console.log("[DROP-UPLOAD] processing file item[", itemIdx, "]:", item.file.name);
+                    await uploadFile(item.file, destUri);
+                    bumpProgress();
+                    throttledRefresh();
+                    console.log("[DROP-UPLOAD] file item done:", item.file.name);
+                }
+            }
+            console.log("[DROP-UPLOAD] processDropUpload done, clearing progress");
+            setUploadProgress(null);
+            throttledRefresh();
+        },
+        [uploadFile, uploadDirRecursive, bumpProgress, throttledRefresh]
     );
 
     const handleNativeDrop = useCallback(
-        async (e: React.DragEvent) => {
+        (e: React.DragEvent) => {
             setIsNativeDragging(false);
             if (!e.dataTransfer || e.dataTransfer.files.length === 0) {
                 return;
             }
             e.preventDefault();
             e.stopPropagation();
-            const destUri = await model.formatRemoteUri(dirPath, globalStore.get);
-            const items = e.dataTransfer.items;
-            for (let i = 0; i < items.length; i++) {
-                const entry = items[i].webkitGetAsEntry();
-                if (!entry) {
-                    const file = e.dataTransfer.files[i];
-                    if (file) {
-                        await uploadFile(file, destUri);
-                    }
-                    continue;
-                }
-                if (entry.isDirectory) {
-                    await uploadDirectoryEntry(entry as FileSystemDirectoryEntry, destUri);
-                } else if (entry.isFile) {
-                    const fileEntry = entry as FileSystemFileEntry;
-                    const file = await new Promise<File>((resolve, reject) => {
-                        fileEntry.file(resolve, reject);
+            const destUri = model.formatRemoteUri(dirPath, globalStore.get);
+            console.log("[DROP-UPLOAD] handleNativeDrop: files.length:", e.dataTransfer.files.length, "items.length:", e.dataTransfer.items.length);
+            fireAndForget(async () => {
+                try {
+                    const resolvedDestUri = await destUri;
+                    console.log("[DROP-UPLOAD] resolvedDestUri:", resolvedDestUri);
+                    const dropItems = await collectDropItems(e.dataTransfer);
+                    await processDropUpload(resolvedDestUri, dropItems);
+                    console.log("[DROP-UPLOAD] ALL DONE");
+                } catch (err) {
+                    console.warn("[DROP-UPLOAD] fatal error:", err);
+                    setUploadProgress(null);
+                    setErrorMsg({
+                        status: "Upload Failed",
+                        text: `${err}`,
+                        level: "error",
                     });
-                    await uploadFile(file, destUri);
                 }
-            }
-            model.refreshCallback();
+            });
         },
-        [dirPath, model.formatRemoteUri, model.refreshCallback, uploadFile, uploadDirectoryEntry]
+        [dirPath, model.formatRemoteUri, collectDropItems, processDropUpload]
     );
 
     useEffect(() => {
@@ -1099,6 +1215,14 @@ function DirectoryPreview({ model }: DirectoryPreviewProps) {
                     selectedIndices={selectedIndices}
                     onRowClick={onRowClick}
                 />
+                {uploadProgress && (
+                    <div className="dir-upload-progress">
+                        <div className="dir-upload-progress-bar" />
+                        <span className="dir-upload-progress-text">
+                            Uploaded {uploadProgress.completed} file{uploadProgress.completed !== 1 ? "s" : ""}...
+                        </span>
+                    </div>
+                )}
             </div>
             {entryManagerProps && (
                 <EntryManagerOverlay

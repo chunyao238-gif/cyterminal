@@ -84,6 +84,7 @@ export class TermViewModel implements ViewModel {
     termDurableStatus: jotai.Atom<BlockJobStatusData | null>;
     termConfigedDurable: jotai.Atom<null | boolean>;
     searchAtoms?: SearchAtoms;
+    termHistoryOpenAtom: jotai.PrimitiveAtom<boolean>;
 
     constructor({ blockId, nodeModel, tabModel }: ViewModelInitType) {
         this.viewType = "term";
@@ -93,6 +94,7 @@ export class TermViewModel implements ViewModel {
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termWshClient);
         this.nodeModel = nodeModel;
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+        this.termHistoryOpenAtom = jotai.atom(false);
         this.vdomBlockId = jotai.atom((get) => {
             const blockData = get(this.blockAtom);
             return blockData?.meta?.["term:vdomblockid"];
@@ -700,6 +702,13 @@ export class TermViewModel implements ViewModel {
         const waveEvent = keyutil.adaptFromReactOrNativeKeyEvent(event);
         if (waveEvent.type != "keydown") {
             return true;
+        }
+
+        if (keyutil.checkKeyPressed(waveEvent, "Ctrl:e")) {
+            globalStore.set(this.termHistoryOpenAtom, true);
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
         }
 
         if (this.keyDownHandler(waveEvent)) {

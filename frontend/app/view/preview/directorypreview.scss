@@ -225,3 +225,40 @@
         gap: 10px;
     }
 }
+
+.dir-upload-progress {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 22px;
+    background: oklch(from var(--block-bg-color) calc(l + 0.05) c h);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+
+    .dir-upload-progress-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, transparent 0%, rgb(from var(--accent-color) r g b / 0.3) 50%, transparent 100%);
+        animation: upload-progress-sweep 1.5s ease-in-out infinite;
+    }
+
+    .dir-upload-progress-text {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        text-align: center;
+        font-size: 11px;
+        color: var(--main-text-color);
+    }
+}
+
+@keyframes upload-progress-sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}

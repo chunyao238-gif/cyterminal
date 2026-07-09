@@ -6,7 +6,7 @@ import { Atom, Getter } from "jotai";
 
 export function getLayoutStateAtomFromTab(tabAtom: Atom<Tab>, get: Getter): Atom<LayoutState> {
     const tabData = get(tabAtom);
-    if (!tabData) return;
+    if (!tabData || !tabData.layoutstate) return;
     const layoutStateOref = WOS.makeORef("layout", tabData.layoutstate);
     const layoutStateAtom = WOS.getWaveObjectAtom<LayoutState>(layoutStateOref);
     return layoutStateAtom;

@@ -26,6 +26,7 @@ import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme, normalizeCursorStyle } from "./termutil";
 import { TermWrap } from "./termwrap";
+import { TermHistoryPopup } from "./term-history-popup";
 import "./xterm.css";
 
 const dlog = debug("wave:term");
@@ -397,6 +398,7 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
                 <TermLinkTooltip termWrap={termWrapInst} />
             </NullErrorBoundary>
             <Search {...searchProps} />
+            <TermHistoryPopup blockId={blockId} model={model} />
         </div>
     );
 };

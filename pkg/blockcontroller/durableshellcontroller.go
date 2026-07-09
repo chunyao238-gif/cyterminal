@@ -234,6 +234,10 @@ func (dsc *DurableShellController) startNewJob(ctx context.Context, blockMeta wa
 	}
 	cmdStr := blockMeta.GetString(waveobj.MetaKey_Cmd, "")
 	cwd := blockMeta.GetString(waveobj.MetaKey_CmdCwd, "")
+	err := conncontroller.EnsureConnection(ctx, connName)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure connection %q: %w", connName, err)
+	}
 	opts, err := remote.ParseOpts(connName)
 	if err != nil {
 		return "", fmt.Errorf("invalid ssh remote name (%s): %w", connName, err)

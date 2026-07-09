@@ -30,6 +30,7 @@ tasks:
             WCLOUD_ENDPOINT: "https://api-dev.waveterm.dev/central"
             WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.waveterm.dev"
             WAVETERM_NOCONFIRMQUIT: "1"
+            WAVETERM_WSHFORCEUPDATE: "1"
 
     electron:start:
         desc: Run the Electron application directly.

@@ -201,6 +201,7 @@ async function initWave(initOpts: WaveInitOpts) {
     const firstRenderPromise = new Promise<void>((resolve) => {
         firstRenderResolveFn = resolve;
     });
+    (window as any).resolveFirstRender = firstRenderResolveFn;
     const reactElem = createElement(App, { onFirstRender: firstRenderResolveFn }, null);
     const elem = document.getElementById("main");
     const root = createRoot(elem);

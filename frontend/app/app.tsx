@@ -45,8 +45,10 @@ const App = ({ onFirstRender }: { onFirstRender: () => void }) => {
     const tabId = useAtomValue(atoms.staticTabId);
     const waveEnvRef = useRef(makeWaveEnvImpl());
     useEffect(() => {
-        onFirstRender();
-    }, []);
+        if (!tabId) {
+            onFirstRender();
+        }
+    }, [tabId, onFirstRender]);
     return (
         <Provider store={globalStore}>
             <WaveEnvContext.Provider value={waveEnvRef.current}>

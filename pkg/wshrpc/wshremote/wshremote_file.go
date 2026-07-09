@@ -28,8 +28,6 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wshutil"
 )
 
-const RemoteFileTransferSizeLimit = 32 * 1024 * 1024
-
 var DisableRecursiveFileOpts = true
 
 // prepareDestForCopy resolves the final destination path and handles overwrite logic.
@@ -71,7 +69,7 @@ func prepareDestForCopy(destPath string, srcBaseName string, destHasSlash bool, 
 }
 
 // remoteCopyFileInternal copies FROM local (this host) TO local (this host)
-// Only supports copying files, not directories
+// Uses streaming io.Copy, no size limit needed.
 func remoteCopyFileInternal(srcUri, destUri string, srcPathCleaned, destPathCleaned string, destHasSlash bool, overwrite bool) error {
 	srcFileStat, err := os.Stat(srcPathCleaned)
 	if err != nil {
@@ -79,9 +77,6 @@ func remoteCopyFileInternal(srcUri, destUri string, srcPathCleaned, destPathClea
 	}
 	if srcFileStat.IsDir() {
 		return fmt.Errorf("copying directories is not supported")
-	}
-	if srcFileStat.Size() > RemoteFileTransferSizeLimit {
-		return fmt.Errorf("file %q size %d exceeds transfer limit of %d bytes", srcPathCleaned, srcFileStat.Size(), RemoteFileTransferSizeLimit)
 	}
 
 	destFilePath, err := prepareDestForCopy(destPathCleaned, filepath.Base(srcPathCleaned), destHasSlash, overwrite)
@@ -152,9 +147,6 @@ func (impl *ServerImpl) RemoteFileCopyCommand(ctx context.Context, data wshrpc.C
 	}
 	if srcFileInfo.IsDir {
 		return false, fmt.Errorf("copying directories is not supported")
-	}
-	if srcFileInfo.Size > RemoteFileTransferSizeLimit {
-		return false, fmt.Errorf("file %q size %d exceeds transfer limit of %d bytes", data.SrcUri, srcFileInfo.Size, RemoteFileTransferSizeLimit)
 	}
 
 	destFilePath, err := prepareDestForCopy(destPathCleaned, fspath.Base(srcConn.Path), destHasSlash, opts.Overwrite)

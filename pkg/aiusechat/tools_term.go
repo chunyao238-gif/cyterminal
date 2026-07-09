@@ -502,7 +502,22 @@ func GetTermRunCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 			blockORef := waveobj.MakeORef(waveobj.OType_Block, fullBlockId)
 			rtInfo := wstore.GetRTInfo(blockORef)
 			if rtInfo != nil && rtInfo.ShellState == "running-command" {
-				return nil, fmt.Errorf("terminal is busy running another command")
+				waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
+				defer waitCancel()
+				waitTicker := time.NewTicker(200 * time.Millisecond)
+				defer waitTicker.Stop()
+
+				for {
+					rtInfo = wstore.GetRTInfo(blockORef)
+					if rtInfo == nil || rtInfo.ShellState != "running-command" {
+						break
+					}
+					select {
+					case <-waitCtx.Done():
+						return nil, fmt.Errorf("terminal is busy running another command")
+					case <-waitTicker.C:
+					}
+				}
 			}
 
 			// Send the input to the block

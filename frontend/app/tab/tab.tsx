@@ -10,7 +10,7 @@ import { Button } from "@/element/button";
 import { validateCssColor } from "@/util/color-validator";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
-import { useAtomValue } from "jotai";
+import { atom, useAtomValue } from "jotai";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { makeORef } from "../store/wos";
 import { TabBadges } from "./tabbadges";
@@ -191,6 +191,7 @@ const TabV = forwardRef<HTMLDivElement, TabVProps>((props, ref) => {
             onClick={onClick}
             onContextMenu={onContextMenu}
             data-tab-id={tabId}
+            title={tabName}
         >
             {showDivider && <div className="tab-divider" />}
             <div className="tab-inner">
@@ -234,6 +235,8 @@ interface TabProps {
     onLoaded: () => void;
 }
 
+const dummyAtom = atom<any>(null);
+
 const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
     const { id, active, showDivider, isDragging, tabWidth, isNew, onLoaded, onSelect, onClose, onDragStart } = props;
     const env = useWaveEnv<TabEnv>();
@@ -252,20 +255,21 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
     }
 
     const loadedRef = useRef(false);
+    const lastValidNameRef = useRef<string | null>(null);
     const renameRef = useRef<(() => void) | null>(null);
     const tabModel = getTabModelByTabId(id, env);
 
-    const layoutModel = getLayoutModelForTabById(id);
-    const focusedNode = useAtomValue(layoutModel.focusedNode);
+    const layoutModel = active ? getLayoutModelForTabById(id) : null;
+    const focusedNode = useAtomValue(layoutModel?.focusedNode ?? dummyAtom);
     // Subscribe to tree state to re-evaluate when layout nodes change
-    const treeState = useAtomValue(layoutModel.localTreeStateAtom);
+    const treeState = useAtomValue(layoutModel?.localTreeStateAtom ?? dummyAtom);
     const fullConfig = useAtomValue(env.atoms.fullConfigAtom);
 
     // Find active block ID under this tab
     let activeBlockId: string | null = null;
-    if (focusedNode?.data?.blockId) {
+    if (active && focusedNode?.data?.blockId) {
         activeBlockId = focusedNode.data.blockId;
-    } else {
+    } else if (active && layoutModel) {
         const stack = layoutModel.getFocusedNodeIdStack() || [];
         for (let i = stack.length - 1; i >= 0; i--) {
             const node = layoutModel.getNode(stack[i]);
@@ -285,6 +289,9 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
             }
         }
     }
+    if (!activeBlockId && tabData?.blockids && tabData.blockids.length > 0) {
+        activeBlockId = tabData.blockids[0];
+    }
 
     // Load active block data
     const [blockData] = env.wos.useWaveObjectValue<Block>(
@@ -295,6 +302,10 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
     let computedTabName = tabData?.name ?? "";
     const defaultTabNameRe = /^T\d+$/;
     if (!computedTabName || defaultTabNameRe.test(computedTabName)) {
+        const cachedName = localStorage.getItem(`resolved-tab-name:${id}`);
+        if (cachedName) {
+            computedTabName = cachedName;
+        }
         if (blockData) {
             const connName = blockData.meta?.connection || "";
             const isLocal = !connName || connName === "local" || connName.startsWith("local:");
@@ -310,6 +321,14 @@ const TabInner = forwardRef<HTMLDivElement, TabProps>((props, ref) => {
                 const hostIp = connConfig?.["ssh:hostname"] || connName;
                 computedTabName = hostIp;
             }
+            try {
+                localStorage.setItem(`resolved-tab-name:${id}`, computedTabName);
+            } catch (e) {
+                console.error("failed to save resolved tab name to localStorage", e);
+            }
+            lastValidNameRef.current = computedTabName;
+        } else if (lastValidNameRef.current) {
+            computedTabName = lastValidNameRef.current;
         }
     }
 

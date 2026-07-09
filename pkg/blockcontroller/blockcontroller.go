@@ -189,16 +189,18 @@ func ResyncController(ctx context.Context, tabId string, blockId string, rtOpts 
 	}
 
 	// Determine if we should use DurableShellController vs ShellController
-	shouldUseDurableShellController := controllerName == BlockController_Shell && jobcontroller.IsBlockIdTermDurable(blockId)
-	if shouldUseDurableShellController && !conncontroller.IsLocalConnName(connName) {
-		fullConfig := wconfig.GetWatcher().GetFullConfig()
-		enableWsh := fullConfig.Settings.ConnWshEnabled
-		connSettings, ok := fullConfig.Connections[connName]
-		if ok && connSettings.ConnWshEnabled != nil {
-			enableWsh = *connSettings.ConnWshEnabled
-		}
-		if !enableWsh {
-			shouldUseDurableShellController = false
+	shouldUseDurableShellController := false
+	if controllerName == BlockController_Shell {
+		if conncontroller.IsLocalConnName(connName) {
+			shouldUseDurableShellController = jobcontroller.IsBlockIdTermDurable(blockId)
+		} else {
+			fullConfig := wconfig.GetWatcher().GetFullConfig()
+			enableWsh := fullConfig.Settings.ConnWshEnabled
+			connSettings, ok := fullConfig.Connections[connName]
+			if ok && connSettings.ConnWshEnabled != nil {
+				enableWsh = *connSettings.ConnWshEnabled
+			}
+			shouldUseDurableShellController = enableWsh
 		}
 	}
 
@@ -453,11 +455,7 @@ func CheckConnStatus(blockId string) error {
 		}
 		return nil
 	}
-	err = conncontroller.EnsureConnection(context.Background(), connName)
-	if err != nil {
-		return fmt.Errorf("failed to ensure connection %q: %w", connName, err)
-	}
-	return nil
+	return conncontroller.EnsureConnection(context.Background(), connName)
 }
 
 func makeSwapToken(ctx context.Context, logCtx context.Context, blockId string, blockMeta waveobj.MetaMapType, remoteName string, shellType string) *shellutil.TokenSwapEntry {

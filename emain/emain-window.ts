@@ -425,7 +425,7 @@ export class WaveBrowserWindow extends BaseWindow {
         const clientId = await getClientId();
         await this.awaitWithDevTimeout(tabView.initPromise, "initPromise", tabView.waveTabId);
         const winBounds = this.getContentBounds();
-        tabView.setBounds({ x: 0, y: 0, width: winBounds.width, height: winBounds.height });
+        tabView.setBounds({ x: -15000, y: -15000, width: winBounds.width, height: winBounds.height });
         this.contentView.addChildView(tabView);
         const initOpts: WaveInitOpts = {
             tabId: tabView.waveTabId,

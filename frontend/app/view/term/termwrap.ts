@@ -19,6 +19,7 @@ import {
 import * as services from "@/store/services";
 import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
 import { base64ToArray, fireAndForget } from "@/util/util";
+import { addCommandToHistory, stripPrompt } from "./term-history";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -466,6 +467,22 @@ export class TermWrap {
     handleTermData(data: string) {
         if (!this.loaded) {
             return;
+        }
+
+        if (data === "\r" || data === "\n" || data === "\r\n") {
+            try {
+                const buffer = this.terminal.buffer.active;
+                const lineIndex = buffer.baseY + buffer.cursorY;
+                const line = buffer.getLine(lineIndex)?.translateToString();
+                if (line) {
+                    const cmd = stripPrompt(line);
+                    if (cmd && cmd.trim() !== "") {
+                        addCommandToHistory(this.blockId, cmd);
+                    }
+                }
+            } catch (e) {
+                console.error("error recording command history", e);
+            }
         }
 
         this.sendDataHandler?.(data);

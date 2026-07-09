@@ -47,6 +47,16 @@ const TabContent = React.memo(({ tabId, noTopPadding }: { tabId: string; noTopPa
         } as TileLayoutContents;
     }, [tabId, tileGapSize]);
 
+    React.useEffect(() => {
+        if (!tabLoading) {
+            const resolveFn = (window as any).resolveFirstRender;
+            if (resolveFn) {
+                resolveFn();
+                (window as any).resolveFirstRender = null;
+            }
+        }
+    }, [tabLoading]);
+
     let innerContent;
 
     if (tabLoading) {

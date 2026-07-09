@@ -16,27 +16,20 @@ function getLayoutModelForTab(tabAtom: Atom<Tab>): LayoutModel {
     const tabData = globalStore.get(tabAtom);
     if (!tabData) return;
     const tabId = tabData.oid;
-    if (layoutModelMap.has(tabId)) {
-        const layoutModel = layoutModelMap.get(tabData.oid);
-        if (layoutModel) {
-            return layoutModel;
-        }
-    }
-    const layoutModel = new LayoutModel(tabAtom, globalStore.get, globalStore.set);
     
-    const staticTabId = globalStore.get(atoms.staticTabId);
-    if (tabId === staticTabId) {
-        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom, globalStore.get);
-        globalStore.sub(layoutStateAtom, () => {
-            layoutModel.onBackendUpdate();
-        });
+    let layoutModel = layoutModelMap.get(tabId);
+    if (!layoutModel) {
+        layoutModel = new LayoutModel(tabAtom, globalStore.get, globalStore.set);
+        layoutModelMap.set(tabId, layoutModel);
     }
     
-    layoutModelMap.set(tabId, layoutModel);
     return layoutModel;
 }
 
 export function getLayoutModelForTabById(tabId: string) {
+    if (layoutModelMap.has(tabId)) {
+        return layoutModelMap.get(tabId);
+    }
     const tabOref = WOS.makeORef("tab", tabId);
     const tabAtom = WOS.getWaveObjectAtom<Tab>(tabOref);
     return getLayoutModelForTab(tabAtom);
@@ -66,6 +59,20 @@ export function useTileLayout(tabAtom: Atom<Tab>, tileContent: TileLayoutContent
     useEffect(() => fireAndForget(() => layoutModel.onTreeStateAtomUpdated(true)), []);
 
     useEffect(() => layoutModel.registerTileLayout(tileContent), [tileContent]);
+
+    // Backend subscription for active tab layout
+    useEffect(() => {
+        if (!layoutModel) return;
+        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom, globalStore.get);
+        const unsub = globalStore.sub(layoutStateAtom, () => {
+            layoutModel.onBackendUpdate();
+        });
+        layoutModel.onBackendUpdate();
+        return () => {
+            unsub();
+        };
+    }, [tabAtom, layoutModel]);
+
     return layoutModel;
 }
 
